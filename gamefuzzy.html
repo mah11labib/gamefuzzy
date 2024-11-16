@@ -1,0 +1,606 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Game Fuzzy Logic - Tembak Target</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f0f0f0;
+            text-align: center;
+        }
+        canvas {
+            border: 3px solid #333;
+            border-radius: 10px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.3);
+            background-color: #fff;
+            cursor: crosshair;
+        }
+        .controls {
+            margin: 20px;
+            padding: 20px;
+            background-color: #fff;
+            border-radius: 10px;
+            box-shadow: 0 0 5px rgba(0,0,0,0.2);
+        }
+        button {
+            padding: 10px 20px;
+            font-size: 16px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        .game-info {
+            display: flex;
+            justify-content: space-around;
+            margin: 10px;
+        }
+        .level-indicator {
+            font-size: 18px;
+            font-weight: bold;
+            color: #333;
+        }
+        .level-up-notification, .win-notification {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background-color: rgba(0,0,0,0.8);
+            color: white;
+            padding: 20px;
+            border-radius: 10px;
+            display: none;
+            z-index: 1000;
+            animation: fadeInOut 2s ease-in-out;
+        }
+        .win-notification {
+            background-color: rgba(0,255,0,0.8);
+            font-size: 24px;
+            padding: 30px;
+        }
+        @keyframes fadeInOut {
+            0% { opacity: 0; }
+            50% { opacity: 1; }
+            100% { opacity: 0; }
+        }
+        .pause-menu {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background-color: rgba(0,0,0,0.9);
+            color: white;
+            padding: 30px;
+            border-radius: 10px;
+            display: none;
+            z-index: 1000;
+        }
+    </style>
+</head>
+<body>
+    <h1>Game Tembak Target dengan Fuzzy Logic</h1>
+    <div class="controls">
+        <button onclick="mulaiGame()">Mulai Game</button>
+        <button onclick="resetGame()">Reset Game</button>
+        <button onclick="togglePause()">Pause</button>
+        <div class="game-info">
+            <p>Level: <span id="level">1</span></p>
+            <p>Skor: <span id="skor">0</span></p>
+            <p>Waktu: <span id="waktu">60</span> detik</p>
+        </div>
+    </div>
+    <div id="levelUpNotification" class="level-up-notification">
+        Selamat! Anda naik ke Level <span id="newLevel"></span>
+    </div>
+    <div id="winNotification" class="win-notification">
+        Selamat! Anda telah menyelesaikan semua level!<br>
+        Anda adalah pemenang!
+    </div>
+    <div id="pauseMenu" class="pause-menu">
+        <h2>Game Paused</h2>
+        <button onclick="resumeGame()">Resume</button>
+        <button onclick="resetGame()">Reset</button>
+    </div>
+    <canvas id="gameCanvas" width="800" height="600"></canvas>
+
+    <audio id="shootSound" src="shoot.mp3"></audio>
+    <audio id="hitSound" src="hit.mp3"></audio>
+    <audio id="missSound" src="miss.mp3"></audio>
+    <audio id="birdHitSound" src="bird-hit.mp3"></audio>
+    <audio id="levelUpSound" src="level-up.mp3"></audio>
+    <audio id="gameOverSound" src="game-over.mp3"></audio>
+    <audio id="bgMusic" src="background-music.mp3" loop></audio>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        let skor = 0;
+        let level = 1;
+        let waktuTersisa = 60;
+        let gameInterval;
+        let targetInterval;
+        let birdInterval;
+        let targetSize = 20;
+        let gameActive = false;
+        let lastClickTime = 0;
+        let timerSpeed = 1000; // Timer default 1 detik
+        const MAX_LEVEL = 5; // Level maksimal
+        let isPaused = false;
+        
+        // Audio elements
+        const shootSound = document.getElementById('shootSound');
+        const hitSound = document.getElementById('hitSound');
+        const missSound = document.getElementById('missSound');
+        const birdHitSound = document.getElementById('birdHitSound');
+        const levelUpSound = document.getElementById('levelUpSound');
+        const gameOverSound = document.getElementById('gameOverSound');
+        const bgMusic = document.getElementById('bgMusic');
+        
+        // Posisi target
+        let targetX = Math.random() * (canvas.width - 50);
+        let targetY = Math.random() * (canvas.height - 50);
+
+        // Array untuk menyimpan multiple burung dan pesawat
+        let birds = [
+            {
+                x: 0,
+                y: Math.random() * (canvas.height - 50),
+                speed: 3,
+                size: 50
+            },
+            {
+                x: 0,
+                y: Math.random() * (canvas.height - 50),
+                speed: 4,
+                size: 50
+            },
+            {
+                x: 0,
+                y: Math.random() * (canvas.height - 50),
+                speed: 5,
+                size: 50
+            }
+        ];
+
+        let planes = []; // Array untuk pesawat
+
+        function togglePause() {
+            if (!gameActive) return;
+            
+            isPaused = !isPaused;
+            const pauseMenu = document.getElementById('pauseMenu');
+            
+            if (isPaused) {
+                clearInterval(gameInterval);
+                clearInterval(targetInterval);
+                clearInterval(birdInterval);
+                bgMusic.pause();
+                pauseMenu.style.display = 'block';
+            } else {
+                resumeGame();
+            }
+        }
+
+        function resumeGame() {
+            if (!gameActive) return;
+            
+            isPaused = false;
+            document.getElementById('pauseMenu').style.display = 'none';
+            gameInterval = setInterval(updateWaktu, timerSpeed);
+            birdInterval = setInterval(() => {
+                gerakkanObstacle();
+                gambarTarget();
+            }, 50);
+            bgMusic.play();
+            
+            // Restart target interval based on level
+            if (level === 1) {
+                targetInterval = setInterval(() => {
+                    if (Date.now() - lastClickTime >= 10000) pindahTarget();
+                }, 10000);
+            } else if (level === 2) {
+                targetInterval = setInterval(() => {
+                    if (Date.now() - lastClickTime >= 5000) pindahTarget();
+                }, 5000);
+            } else if (level === 3) {
+                targetInterval = setInterval(() => {
+                    if (Date.now() - lastClickTime >= 3000) pindahTarget();
+                }, 3000);
+            } else {
+                targetInterval = setInterval(pindahTarget, 6000);
+            }
+        }
+        
+        // Fungsi untuk menampilkan notifikasi naik level
+        function showLevelUpNotification(newLevel) {
+            const notification = document.getElementById('levelUpNotification');
+            document.getElementById('newLevel').textContent = newLevel;
+            notification.style.display = 'block';
+            setTimeout(() => {
+                notification.style.display = 'none';
+            }, 2000);
+        }
+
+        // Fungsi untuk menampilkan notifikasi menang
+        function showWinNotification() {
+            const winNotif = document.getElementById('winNotification');
+            winNotif.style.display = 'block';
+            setTimeout(() => {
+                winNotif.style.display = 'none';
+                resetGame();
+            }, 5000);
+        }
+        
+        // Fungsi fuzzy untuk menghitung akurasi tembakan
+        function hitungAkurasi(jarakX, jarakY) {
+            let jarak = Math.sqrt(jarakX * jarakX + jarakY * jarakY);
+            
+            if(jarak < targetSize) {
+                return 1; // Sangat akurat
+            } else if(jarak < targetSize * 2.5) {
+                return 0.7; // Cukup akurat
+            } else if(jarak < targetSize * 5) {
+                return 0.3; // Kurang akurat
+            } else {
+                return 0; // Tidak akurat
+            }
+        }
+        
+        // Fungsi untuk memindahkan target secara otomatis
+        function pindahTarget() {
+            targetX = Math.random() * (canvas.width - 50);
+            targetY = Math.random() * (canvas.height - 50);
+            gambarTarget();
+        }
+
+        // Fungsi untuk menggambar pesawat
+        function gambarPesawat(plane) {
+            ctx.beginPath();
+            ctx.moveTo(plane.x, plane.y);
+            ctx.lineTo(plane.x + 60, plane.y);
+            ctx.lineTo(plane.x + 40, plane.y - 20);
+            ctx.lineTo(plane.x, plane.y);
+            ctx.fillStyle = "#808080";
+            ctx.fill();
+            ctx.closePath();
+        }
+
+        // Fungsi untuk menggerakkan burung dan pesawat
+        function gerakkanObstacle() {
+            birds.forEach(bird => {
+                bird.x += bird.speed;
+                if (bird.x > canvas.width) {
+                    bird.x = -bird.size;
+                    bird.y = Math.random() * (canvas.height - 50);
+                }
+            });
+
+            if (level >= 2) {
+                planes.forEach(plane => {
+                    plane.x += plane.speed;
+                    if (plane.x > canvas.width) {
+                        plane.x = -60;
+                        plane.y = Math.random() * (canvas.height - 50);
+                    }
+                });
+            }
+        }
+        
+        // Gambar burung
+        function gambarBurung() {
+            birds.forEach(bird => {
+                ctx.beginPath();
+                ctx.moveTo(bird.x, bird.y);
+                ctx.bezierCurveTo(
+                    bird.x + bird.size/3, bird.y - bird.size/3,
+                    bird.x + (2*bird.size/3), bird.y - bird.size/3,
+                    bird.x + bird.size, bird.y
+                );
+                ctx.bezierCurveTo(
+                    bird.x + (2*bird.size/3), bird.y + bird.size/3,
+                    bird.x + bird.size/3, bird.y + bird.size/3,
+                    bird.x, bird.y
+                );
+                ctx.fillStyle = "#4169E1";
+                ctx.fill();
+                ctx.closePath();
+            });
+        }
+
+        // Fungsi untuk menggambar api (level >3)
+        function gambarApi() {
+            ctx.beginPath();
+            ctx.moveTo(targetX - 10, targetY + 20);
+            ctx.quadraticCurveTo(targetX, targetY + 40, targetX + 10, targetY + 20);
+            ctx.quadraticCurveTo(targetX + 5, targetY + 30, targetX, targetY + 25);
+            ctx.quadraticCurveTo(targetX - 5, targetY + 30, targetX - 10, targetY + 20);
+            ctx.fillStyle = "#FF4500";
+            ctx.fill();
+            ctx.closePath();
+        }
+        
+        // Gambar target
+        function gambarTarget() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            if (level > 3) {
+                // Background gradient untuk level >3
+                let gradient = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
+                gradient.addColorStop(0, "#4a0000");
+                gradient.addColorStop(1, "#000");
+                ctx.fillStyle = gradient;
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+            }
+
+            // Gambar lingkaran target
+            ctx.beginPath();
+            ctx.arc(targetX, targetY, targetSize, 0, Math.PI * 2);
+            ctx.fillStyle = level % 2 === 0 ? '#ff4444' : '#ff0000';
+            ctx.fill();
+            
+            // Gambar lingkaran luar
+            ctx.beginPath();
+            ctx.arc(targetX, targetY, targetSize * 1.5, 0, Math.PI * 2);
+            ctx.strokeStyle = level > 3 ? '#ff0' : '#000';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+
+            if (level > 3) {
+                gambarApi();
+            }
+
+            // Gambar burung
+            gambarBurung();
+
+            // Gambar pesawat jika level >= 2
+            if (level >= 2) {
+                planes.forEach(plane => gambarPesawat(plane));
+            }
+
+            // Tampilkan teks PAUSED jika game di-pause
+            if (isPaused) {
+                ctx.font = "48px Arial";
+                ctx.fillStyle = "white";
+                ctx.textAlign = "center";
+                ctx.fillText("PAUSED", canvas.width/2, canvas.height/2);
+            }
+        }
+        
+        function mulaiGame() {
+            if (!gameActive) {
+                gameActive = true;
+                isPaused = false;
+                waktuTersisa = level === MAX_LEVEL ? 30 : 60;
+                skor = 0;
+                level = 1;
+                targetSize = 20;
+                timerSpeed = 1000;
+                planes = [];
+                updateDisplay();
+                bgMusic.play();
+                
+                gameInterval = setInterval(updateWaktu, timerSpeed);
+                
+                // Set interval berdasarkan level
+                if (level === 1) {
+                    targetInterval = setInterval(() => {
+                        if (Date.now() - lastClickTime >= 10000) {
+                            pindahTarget();
+                        }
+                    }, 10000);
+                } else if (level === 2) {
+                    targetInterval = setInterval(() => {
+                        if (Date.now() - lastClickTime >= 5000) {
+                            pindahTarget();
+                        }
+                    }, 5000);
+                    // Tambah pesawat
+                    planes.push({
+                        x: 0,
+                        y: Math.random() * (canvas.height - 50),
+                        speed: 4
+                    });
+                } else if (level === 3) {
+                    targetInterval = setInterval(() => {
+                        if (Date.now() - lastClickTime >= 3000) {
+                            pindahTarget();
+                        }
+                    }, 3000);
+                    birds.forEach(bird => bird.speed *= 1.5);
+                    planes.forEach(plane => plane.speed *= 1.5);
+                } else {
+                    targetInterval = setInterval(pindahTarget, 6000); // 6 detik untuk level 4 & 5
+                }
+
+                birdInterval = setInterval(() => {
+                    gerakkanObstacle();
+                    gambarTarget();
+                }, 50);
+                
+                gambarTarget();
+            }
+        }
+        
+        function resetGame() {
+            gameActive = false;
+            isPaused = false;
+            document.getElementById('pauseMenu').style.display = 'none';
+            clearInterval(gameInterval);
+            clearInterval(targetInterval);
+            clearInterval(birdInterval);
+            waktuTersisa = 60;
+            skor = 0;
+            level = 1;
+            targetSize = 20;
+            lastClickTime = 0;
+            timerSpeed = 1000;
+            planes = [];
+            bgMusic.pause();
+            bgMusic.currentTime = 0;
+            birds.forEach(bird => {
+                bird.x = 0;
+                bird.y = Math.random() * (canvas.height - 50);
+                bird.speed = bird.speed / 1.5; // Reset kecepatan
+            });
+            updateDisplay();
+            gambarTarget();
+        }
+        
+        function updateWaktu() {
+            if (waktuTersisa > 0) {
+                waktuTersisa--;
+                document.getElementById('waktu').textContent = waktuTersisa;
+                
+                // Cek skor untuk naik level
+                if (skor >= 1500) {
+                    level++;
+                    
+                    if (level > MAX_LEVEL) {
+                        showWinNotification();
+                        bgMusic.pause();
+                        bgMusic.currentTime = 0;
+                        levelUpSound.play();
+                        return;
+                    }
+                    
+                    showLevelUpNotification(level);
+                    skor = 0;
+                    waktuTersisa = level === MAX_LEVEL ? 30 : 60;
+                    targetSize = Math.max(5, targetSize - 3);
+                    birds.forEach(bird => bird.speed += 1);
+                    
+                    if (level >= 4) {
+                        timerSpeed = Math.max(500, timerSpeed - 200);
+                        clearInterval(gameInterval);
+                        gameInterval = setInterval(updateWaktu, timerSpeed);
+                    }
+
+                    levelUpSound.play();
+                    
+                    // Update interval target berdasarkan level
+                    clearInterval(targetInterval);
+                    if (level === 2) {
+                        targetInterval = setInterval(() => {
+                            if (Date.now() - lastClickTime >= 5000) {
+                                pindahTarget();
+                            }
+                        }, 5000);
+                        planes.push({
+                            x: 0,
+                            y: Math.random() * (canvas.height - 50),
+                            speed: 4
+                        });
+                    } else if (level === 3) {
+                        targetInterval = setInterval(() => {
+                            if (Date.now() - lastClickTime >= 3000) {
+                                pindahTarget();
+                            }
+                        }, 3000);
+                        birds.forEach(bird => bird.speed *= 1.5);
+                        planes.forEach(plane => plane.speed *= 1.5);
+                    } else if (level >= 4) {
+                        targetInterval = setInterval(pindahTarget, 6000); // 6 detik untuk level 4 & 5
+                    }
+                    
+                    updateDisplay();
+                }
+            } else {
+                gameOverSound.play();
+                bgMusic.pause();
+                bgMusic.currentTime = 0;
+                alert(`Game Over! Skor Akhir: ${skor}`);
+                resetGame();
+            }
+        }
+        
+        function updateDisplay() {
+            document.getElementById('skor').textContent = skor;
+            document.getElementById('level').textContent = level;
+            document.getElementById('waktu').textContent = waktuTersisa;
+        }
+        
+        // Fungsi tembak
+        function tembak(event) {
+            if (!gameActive || isPaused) return;
+            
+            shootSound.play();
+            
+            let mouseX = event.clientX - canvas.getBoundingClientRect().left;
+            let mouseY = event.clientY - canvas.getBoundingClientRect().top;
+            
+            let jarakX = Math.abs(mouseX - targetX);
+            let jarakY = Math.abs(mouseY - targetY);
+            
+            // Cek tembakan ke obstacle
+            let hitObstacle = birds.some(bird => {
+                let jarakKeObstacle = Math.sqrt(
+                    Math.pow(mouseX - (bird.x + bird.size/2), 2) + 
+                    Math.pow(mouseY - bird.y, 2)
+                );
+                return jarakKeObstacle < bird.size;
+            });
+
+            if (level >= 2) {
+                hitObstacle = hitObstacle || planes.some(plane => {
+                    let jarakKePesawat = Math.sqrt(
+                        Math.pow(mouseX - (plane.x + 30), 2) + 
+                        Math.pow(mouseY - plane.y, 2)
+                    );
+                    return jarakKePesawat < 30;
+                });
+            }
+            
+            if (hitObstacle) {
+                birdHitSound.play();
+                skor -= 50;
+                updateDisplay();
+                return;
+            }
+            
+            let akurasi = hitungAkurasi(jarakX, jarakY);
+            
+            if(akurasi > 0) {
+                hitSound.play();
+                // Tambah skor berdasarkan akurasi
+                if(akurasi === 1) {
+                    skor += 150; // Sangat akurat
+                } else if(akurasi === 0.7) {
+                    skor += 100; // Cukup akurat
+                } else if(akurasi === 0.3) {
+                    skor += 50; // Kurang akurat
+                }
+            } else {
+                missSound.play();
+                skor -= 25; // Pengurangan skor jika meleset
+            }
+            
+            updateDisplay();
+            
+            lastClickTime = Date.now();
+            
+            targetX = Math.random() * (canvas.width - 50);
+            targetY = Math.random() * (canvas.height - 50);
+            
+            gambarTarget();
+        }
+
+        // Event listener untuk keyboard
+        document.addEventListener('keydown', function(event) {
+            if (event.key === 'p' || evenclt.key === 'P') {
+                togglePause();
+            }
+        });
+        
+        // Inisialisasi game
+        gambarTarget();
+        
+        // Event listener untuk mouse
+        canvas.addEventListener('click', tembak);
+    </script>
+</body>
+</html>
